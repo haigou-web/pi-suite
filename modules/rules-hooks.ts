@@ -10,7 +10,6 @@
 // 规则映射：
 //   H9a 生图命令必须显式 -Model 'GPT Image 2.5 Flare'             → block
 //   H9b 真跑前须先跑一次不带 -ClickConfirm 的配置轮               → block
-//   H10 Jev 应经 acp_delegate 派发，不在主上下文内联调用           → advise（子进程也加载本扩展，不能拦）
 //   H11 Jev 不用于算术连动 / 合计行 / 数值核验                     → block
 //   H4  实现术语首次出现要附一句人话解释                           → advise
 //   H5  不预演未要求步骤                                           → advise
@@ -112,9 +111,9 @@ export default function (pi: any) {
         // 2026-09-23 删掉 H7（「子 Agent 一律走 acp_delegate」）：用户已关掉 pi-web 默认子代理，
         // Agent / TaskExecute 不再出现在派活路径上，这条守卫没有对象了（版本 1.0 → 1.1）。
 
-        // 内联执行（有 command）时，才判 Jev / monica；避免误伤 acp_delegate 的 task 文本
+        // 内联执行（有 command）时，才判 Jev 相关规则；避免误伤子代理调用的 task 文本
         if (cmd) {
-          // H11 / H10：Jev 相关
+          // H11：Jev 相关
           if (JEVI.test(cmd)) {
             if (ARITH.test(cmd)) {
               bump("H11", { target: cmd, tool });
@@ -128,7 +127,6 @@ export default function (pi: any) {
               }
               return undefined;
             }
-            bump("H10", { target: cmd, tool }); // 只记录：子 Agent 也是独立 pi 进程，拦了会误伤正规路径
           }
 
           // H9：生图
@@ -249,7 +247,6 @@ export default function (pi: any) {
             "H9a 生图缺 -Model 'GPT Image 2.5'  " + (counters.H9a ?? 0),
             "H9b 生图跳过了配置轮               " + (counters.H9b ?? 0),
             "H11 Jev 用于算术/合计              " + (counters.H11 ?? 0),
-            "H10 Jev 内联调用（只记录）         " + (counters.H10 ?? 0),
             "H4  术语没解释（只记录）           " + (counters.H4 ?? 0),
             "H5  预演未要求步骤（只记录）       " + (counters.H5 ?? 0),
             "H6  数字没来源（只记录）           " + (counters.H6 ?? 0),

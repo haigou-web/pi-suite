@@ -15,11 +15,8 @@
 | `skill-gate` | 在消息提交前做技能路由：对技能清单做两段式 choice，置信够高就把消息改写成 `/skill:<name>`。 | 开 |
 | `rules-hooks` | 把一份 `AGENTS.md` 里能机械判定的规则做成钩子：术语没解释、预演未要求的步骤、编数字、文档读取没给回执。 | 开 |
 | `session-file-audit` | 拿会话自己的历史核对文件操作——拦破坏性命令、别名/junction 路径、受保护文件。 | 开 |
-| `pi-tasks-bridge` | 把 pi 的任务列表与外部任务面板对接。 | 开 |
 | `tool-prune` | 在超长工具输出进入上下文前先裁剪。 | 开 |
 | `image-offload` | 把读图挪进嵌套子 agent，图片字节不进入主对话，从而保住 prompt 缓存。 | 开 |
-
-`tools/acp-compress/` **不**作为扩展加载。它是独立工具，用于生成 ACP 式上下文管理所需的压缩提示词块，手动运行即可。见 `tools/acp-compress/README.md`。
 
 ## 安装
 
@@ -73,7 +70,6 @@ export PI_HARD_RULES_CONFIG=~/.pi/hard-rules.json
 ```bash
 bun modules/hard-rules/test.mjs          # 199 例
 bun modules/session-file-audit/test.mjs  # 117 例
-bun modules/acp-compress/selftest.mjs    #   7 例
 ```
 
 `hard-rules` 里的「词表漂移测试」会把编译后的词表和一份外部 rubric 文档比对，除非你把 `PI_RUBRIC_MD` 指过去，否则自动跳过。

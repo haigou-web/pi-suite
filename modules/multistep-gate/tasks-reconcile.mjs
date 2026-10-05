@@ -32,7 +32,6 @@ export const ACTION_TOOL_NAMES = new Set([
   "bash",
   "edit",
   "write",
-  "acp_delegate",
   "acp_delegate_wait",
   "acp_delegate_cancel",
   "TaskExecute",

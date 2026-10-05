@@ -5,7 +5,7 @@
  *  - 拦截 write 工具调用，记录本会话生成的文件到本地 manifest（磁盘，不进上下文）
  *  - bash/powershell 生成的文件通过有界目录扫描捕获（mtime ≥ 会话开始时间）
  *  - read/edit 命中时标记"已使用"
- *  - billion-context-pi 的 compress 工具执行完成后触发审计：
+ *  - 会话中途触发审计：
  *      · 从未被读回且超过 staleMinutes 的文件
  *      · 临时文件模式（.tmp/.bak/~/(copy)/draft 等）
  *      · 被新版本取代的旧稿（foo_v1.md vs foo_v2.md）
@@ -824,7 +824,9 @@ export default function (pi: ExtensionAPI) {
 		return flags;
 	}
 
-	function compressAudit(ctx: ExtensionContext) {
+	/* 压缩前轻量审计：把「疑似无用」的文件通过 notify + 一次性上下文注入提醒用户。
+	 * 零/极低 token：notify 面向用户不进上下文，注入每条会话最多一次。 */
+	function auditAndRemind(ctx: ExtensionContext) {
 		const flags = updateWidget(ctx) ?? [];
 		const fresh = flags.filter((f) => !notifiedPaths.has(f.file));
 		if (fresh.length === 0) return;
@@ -849,7 +851,7 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// 一次性上下文注入（≤ ~40 token，仅压缩后首次）
+		// 一次性上下文注入（≤ ~40 token，仅首次）
 		if (CONFIG.injectReminder) {
 			const listed = fresh
 				.slice(0, CONFIG.maxInjectFiles)
@@ -920,10 +922,6 @@ export default function (pi: ExtensionAPI) {
 				scheduleScan(ctx);
 				break;
 			}
-			case "compress":
-				// billion-context-pi 压缩完成 → 审计 + 提醒
-				compressAudit(ctx);
-				break;
 		}
 	});
 
@@ -1392,6 +1390,12 @@ export default function (pi: ExtensionAPI) {
 	/* 压缩前钩子：pi 触发压缩（/compact 或自动阀值）时先做一次“规则+模型”复核。
 	 * 任何失败/超时都不阻塞压缩（返回 undefined → 走默认压缩流程）。 */
 	pi.on("session_before_compact", async (event, ctx) => {
+		// 轻量审计（不依赖任何第三方压缩工具）：提醒本次会话里疑似无用的生成文件
+		try {
+			auditAndRemind(ctx);
+		} catch (err) {
+			logDbg(`audit 异常（已忽略）：${err instanceof Error ? err.message : String(err)}`);
+		}
 		if (!CONFIG.reviewEnabled) return;
 		try {
 			// 默认只做二次分筛（dryRun）：结果落盘 + toast 提示，由用户在 /files 里一键集体移入

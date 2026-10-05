@@ -104,6 +104,8 @@ const trEvent = (toolName, input) => ({
 	input, content: [], isError: false,
 });
 
+const fireCompactAny = () => fire("session_before_compact", { type: "session_before_compact", reason: "threshold", preparation: {} });
+
 let pass = 0, fail = 0;
 const check = (name, cond, extra = "") => {
 	if (cond) { pass++; console.log(`✅ ${name}`); }
@@ -144,7 +146,7 @@ await fire("tool_result", trEvent("write", { path: v2 }));
 
 // 6. compress 触发审计 → notify + pendingInject
 uiCalls.notify.length = 0;
-await fire("tool_result", trEvent("compress", {}));
+await fireCompactAny();
 check("compress 后触发 notify 提醒", uiCalls.notify.some(c => c.msg.includes("可能无用")), JSON.stringify(uiCalls.notify));
 check("widget 已更新且列出可疑项", uiCalls.widget.at(-1)?.lines?.some(l => l.includes("可清理")), JSON.stringify(uiCalls.widget.at(-1)));
 
@@ -170,7 +172,7 @@ check("manifest 含全部追踪文件", Object.keys(m2).length === 6 && preOld i
 // 10. 删除后审计剔除：模拟用户清理 f1
 fs.rmSync(f1);
 uiCalls.widget.length = 0;
-await fire("tool_result", trEvent("compress", {})); // 再触发一次审计
+await fireCompactAny(); // 再触发一次审计
 const w = uiCalls.widget.at(-1);
 check("已删文件从追踪中剔除", w && !JSON.stringify(w).includes("report.md"), JSON.stringify(w));
 
@@ -1090,7 +1092,7 @@ check("不存在目标放行", evN.input.command === `rm nope-missing.txt`);
 	uiCalls.notify.length = 0;
 	await touch18([...targets, deepFile, sibFile]);
 	await fireCompact18(ctx18);
-	await fire("tool_result", trEvent("compress", {})); // widget 由 compress 结果事件刷新
+	await fireCompactAny(); // widget 由 compress 结果事件刷新
 	const w18f = uiCalls.widget.at(-1);
 	check("提示：全部文件受保护时显示“无待清理项”", w18f?.lines?.some((l) => l.includes("无待清理项")), JSON.stringify(w18f));
 	check(
@@ -1151,7 +1153,7 @@ check("不存在目标放行", evN.input.command === `rm nope-missing.txt`);
 	await fire("session_start", { type: "session_start", reason: "startup" });
 	await fire("tool_result", trEvent("write", { path: viaLink }));
 	await fireCompact19(ctx19);
-	await fire("tool_result", trEvent("compress", {}));
+	await fireCompactAny();
 	let w19 = uiCalls.widget.at(-1);
 	check("别名路径：安全名单仍命中（不进可清理列表）", !w19?.lines?.some((l) => l.includes("data.diff")), JSON.stringify(w19));
 	check(
@@ -1167,7 +1169,7 @@ check("不存在目标放行", evN.input.command === `rm nope-missing.txt`);
 	mockCtx.cwd = jlink;
 	await fire("session_start", { type: "session_start", reason: "startup" });
 	await fire("tool_result", trEvent("write", { path: realFile }));
-	await fire("tool_result", trEvent("compress", {}));
+	await fireCompactAny();
 	w19 = uiCalls.widget.at(-1);
 	check("反向别名（cwd 走 junction）：安全名单仍命中", !w19?.lines?.some((l) => l.includes("data.diff")), JSON.stringify(w19));
 

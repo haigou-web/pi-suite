@@ -18,13 +18,8 @@ so you install one directory instead of eight.
 | `skill-gate` | Routes a request to a skill before the turn is submitted: two-stage choice over the skill roster, rewrites the message to `/skill:<name>` when confident. | on |
 | `rules-hooks` | Mechanical guards mapped from an `AGENTS.md`: jargon-without-explanation, unrequested steps, invented numbers, missing doc-read receipts. | on |
 | `session-file-audit` | Audits file operations against the session's own history — catches destructive commands, aliased/junction paths, and protected files. | on |
-| `pi-tasks-bridge` | Bridges pi's task list with an external task panel. | on |
 | `tool-prune` | Prunes oversized tool output before it reaches the context. | on |
 | `image-offload` | Moves image reads into a nested sub-agent so image bytes never enter the main conversation, keeping the prompt cache intact. | on |
-
-`tools/acp-compress/` is **not** loaded as an extension. It is a standalone helper that
-generates the compression-prompt block used by ACP-style context management; run it
-manually. See `tools/acp-compress/README.md`.
 
 ## Install
 
@@ -89,7 +84,6 @@ directly.
 ```bash
 bun modules/hard-rules/test.mjs          # 199 cases
 bun modules/session-file-audit/test.mjs  # 117 cases
-bun modules/acp-compress/selftest.mjs    #   7 cases
 ```
 
 The word-list drift test inside `hard-rules` compares the compiled word lists against an

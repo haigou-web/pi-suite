@@ -13,8 +13,7 @@
  * 顺序（= 合并前面板里显示的顺序，逐钩子注册次序与合并前一致）：
  *   1 hard-rules         tool_call 拦截：read 直读 pdf/docx/pptx/xlsx、monica 生图缺 -Model
  *   2 multistep-gate     before_agent_start 注入步进锚点 + turn_start/tool_result/context 任务面板对账
- *   3 pi-tasks-bridge    子 Agent RPC 桥（pi.events: subagents:rpc:*）
- *   3.5 tool-prune      session_start/before_agent_start：摘掉用不上的 TaskGet/TaskOutput/TaskStop/TaskExecute（2026-10-04）
+ *   3 tool-prune      session_start/before_agent_start：摘掉用不上的 TaskGet/TaskOutput/TaskStop/TaskExecute（2026-10-04）
  *   4 rules-hooks        H9 / H11 拦截 + 全量记录（H7 已于 09-23 删）
  *   5 session-file-audit 会话文件审计、/files、/trash
  *   6 skill-gate         input 技能路由改写
@@ -41,7 +40,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import hardRules from "./modules/hard-rules.ts";
 import multistepGate from "./modules/multistep-gate.ts";
-import piTasksBridge from "./modules/pi-tasks-bridge/index.ts";
 import toolPrune from "./modules/tool-prune.ts";
 import rulesHooks from "./modules/rules-hooks.ts";
 import sessionFileAudit from "./modules/session-file-audit/index.ts";
@@ -51,7 +49,6 @@ import imageOffload from "./modules/image-offload.ts";
 const MODULES: Array<[string, (pi: any) => any]> = [
   ["hard-rules", hardRules],
   ["multistep-gate", multistepGate],
-  ["pi-tasks-bridge", piTasksBridge],
   ["tool-prune", toolPrune],
   ["rules-hooks", rulesHooks],
   ["session-file-audit", sessionFileAudit],

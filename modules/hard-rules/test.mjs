@@ -101,7 +101,7 @@ for (const p of ["C:\\work\\a.md", "C:\\work\\a.txt", "C:\\work\\a.json", "C:\\w
   const r = read(p);
   ok("放行 read " + path.basename(p), r === null, r && JSON.stringify(r.tags));
 }
-for (const t of ["write", "edit", "grep", "find", "ls", "acp_delegate"]) {
+for (const t of ["write", "edit", "grep", "find", "ls"]) {
   const r = decide({ toolName: t, input: { path: "C:\\work\\a.pdf" }, cwd: CWD, home: HOME });
   ok("放行非 read 工具 " + t, r === null);
 }

@@ -121,7 +121,28 @@ transcript 之外，一次模型调用最轻。
 
 ---
 
-## 六、pi 原生 API（**不是**外部依赖）
+## 六、任务文件格式约定（`multistep-gate`）
+
+`multistep-gate` 会**只读**地扫描任务文件，用来把未完成任务注入上下文 / 做任务面板对账：
+
+| 位置 | 路径 |
+|---|---|
+| 工作区 | `<cwd>/.pi/tasks/tasks-<sessionId>.json` |
+| session-global | `<agent-dir>/tasks/sessions/<projectKey>/tasks-<sessionId>.json` |
+
+路径规则与 **`@tintinweb/pi-tasks`** 的 `task-paths.ts` 对齐。
+
+| | |
+|---|---|
+| **依赖性质** | ⚠️ **概念依赖，无 import**——不装那个包也能跑 |
+| **无依赖时的行为** | ✅ 文件不存在 → 读不到任务 → 注入/对账静默跳过，**不影响其余功能** |
+| **本地替代** | 任何写入上述路径、字段结构相同的任务存储都能被识别；或者干脆不用（任务面板为空） |
+
+> 本模块**只读不写**任务文件，不会与其它任务工具争抢写入权。
+
+---
+
+## 七、pi 原生 API（**不是**外部依赖）
 
 以下都是 pi 扩展 SDK 提供的，任何 pi 环境都有，无需替代：
 
@@ -147,3 +168,4 @@ transcript 之外，一次模型调用最轻。
 | 文件保护名单 | `session-file-audit` | 保护关闭 | 改 `.pi/sfa-protect.txt` |
 | monica 生图约定 | `rules-hooks` | 规则不触发，无害 | 删除或改写 H9a/H9b |
 | 私有压缩工具 | **已全部移除**（改挂 pi 原生 `session_before_compact`） | — | — |
+| 任务文件格式（`@tintinweb/pi-tasks`） | `multistep-gate` | 读不到任务，静默跳过 | 任何同路径/同结构的存储；或不用 |

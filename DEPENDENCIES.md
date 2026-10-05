@@ -123,7 +123,29 @@ Both bind to **one specific image-generation skill (monica)** and its CLI conven
 
 ---
 
-## 6. pi-native APIs (**not** external dependencies)
+## 6. Task-file format convention (`multistep-gate`)
+
+`multistep-gate` **read-only** scans task files to inject unfinished tasks into the context
+and reconcile the task panel:
+
+| Scope | Path |
+|---|---|
+| workspace | `<cwd>/.pi/tasks/tasks-<sessionId>.json` |
+| session-global | `<agent-dir>/tasks/sessions/<projectKey>/tasks-<sessionId>.json` |
+
+The path rules mirror **`@tintinweb/pi-tasks`**' `task-paths.ts`.
+
+| | |
+|---|---|
+| **Dependency kind** | ⚠️ **Conceptual only — no import**; works without that package installed |
+| **Without it** | ✅ File absent → no tasks read → injection/reconciliation silently skipped, **nothing else affected** |
+| **Substitutes** | Any task store writing the same paths with the same shape is picked up; or simply don't use it (empty task panel) |
+
+> The module **never writes** task files, so it will not fight another task tool over writes.
+
+---
+
+## 7. pi-native APIs (**not** external dependencies)
 
 Everything below ships with the pi extension SDK — present in any pi install, no substitute needed:
 
@@ -149,3 +171,4 @@ Everything below ships with the pi extension SDK — present in any pi install, 
 | File protection list | `session-file-audit` | Protection off | Edit `.pi/sfa-protect.txt` |
 | monica image-gen convention | `rules-hooks` | Rules never fire, harmless | Delete or rewrite H9a/H9b |
 | Private compaction tool | **all removed** (moved to pi-native `session_before_compact`) | — | — |
+| Task-file format (`@tintinweb/pi-tasks`) | `multistep-gate` | No tasks read, silently skipped | Any same-path/same-shape store; or none |

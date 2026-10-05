@@ -1,0 +1,11 @@
+# pi runtime artifacts
+*.log
+*.jsonl
+.hard-rules-state.json
+.typesafe_key.txt
+
+# editor / OS
+.DS_Store
+Thumbs.db
+*.bak
+*.bak-*

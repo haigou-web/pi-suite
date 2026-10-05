@@ -18,6 +18,22 @@
 | `tool-prune` | 在超长工具输出进入上下文前先裁剪。 | 开 |
 | `image-offload` | 把读图挪进嵌套子 agent，图片字节不进入主对话，从而保住 prompt 缓存。 | 开 |
 
+## 外部依赖与替代方案
+
+pi-suite 本身零第三方 npm 依赖，但部分模块需要**外部能力**（AI 分类器、视觉模型、生图工具约定……）。
+每一项都给出了本地等价物与「缺了会怎样」的降级说明：
+
+**→ 详见 [DEPENDENCIES.zh-CN.md](./DEPENDENCIES.zh-CN.md)**
+
+速览：
+
+| 依赖 | 涉及模块 | 缺了会怎样 | 本地替代 |
+|---|---|---|---|
+| Typesafe Jev 分类器 | `multistep-gate`、`skill-gate` | multistep **降级为正则可用**；skill-gate **失效** | 正则 / 自建兼容 API / 本地小模型 / 删模块 |
+| 支持视觉的模型 | `image-offload` | fail-open，原样放行图片 | 任意视觉模型（本地 Ollama 亦可） |
+| 子 Agent | **已全部移除** | — | 需要时用 pi 原生 `acp_delegate` |
+| 个人化硬规则 / 保护名单 / 生图约定 | `hard-rules`、`session-file-audit`、`rules-hooks` | 用默认或规则不触发 | 改配置文件或删规则 |
+
 ## 安装
 
 整个目录拷进 pi 扩展目录：

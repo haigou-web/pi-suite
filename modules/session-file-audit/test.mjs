@@ -1195,5 +1195,22 @@ check("不存在目标放行", evN.input.command === `rm nope-missing.txt`);
 	}
 }
 
+// ============ compress 工具事件（2026-10-10 新增挂钩） ============
+// billion-context-pi 的 compress 工具完成后也会触发审计。
+// 与 pi 内置 session_before_compact 互补：前者在压缩后、后者在压缩前。
+// 放在汇总输出之前、其余用例之后，避免污染前面用例的 notifiedPaths 状态。
+{
+	const probe = path.join(tmp, "compress-hook-probe.txt");
+	fs.writeFileSync(probe, "x");
+	await fire("tool_result", trEvent("write", { path: probe }));
+	uiCalls.notify.length = 0;
+	await fire("tool_result", trEvent("compress", {}));
+	check(
+		"compress 工具事件触发审计",
+		uiCalls.notify.length > 0 || uiCalls.widget.length > 0,
+		`notify=${uiCalls.notify.length} widget=${uiCalls.widget.length}`,
+	);
+}
+
 console.log(`\n${pass} passed, ${fail} failed. tmp=${tmp}`);
 process.exit(fail ? 1 : 0);

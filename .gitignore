@@ -9,3 +9,6 @@
 Thumbs.db
 *.bak
 *.bak-*
+
+# 测试时用于加载 .ts 扩展（jiti 由 pi 嵌套携带，此处仅建联接）
+node_modules/

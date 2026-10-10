@@ -5,7 +5,7 @@
  *  - 拦截 write 工具调用，记录本会话生成的文件到本地 manifest（磁盘，不进上下文）
  *  - bash/powershell 生成的文件通过有界目录扫描捕获（mtime ≥ 会话开始时间）
  *  - read/edit 命中时标记"已使用"
- *  - 会话中途触发审计：
+ *  - 会话中途（pi 内置压缩 / billion-context-pi 的 compress 工具）触发审计：
  *      · 从未被读回且超过 staleMinutes 的文件
  *      · 临时文件模式（.tmp/.bak/~/(copy)/draft 等）
  *      · 被新版本取代的旧稿（foo_v1.md vs foo_v2.md）
@@ -922,6 +922,10 @@ export default function (pi: ExtensionAPI) {
 				scheduleScan(ctx);
 				break;
 			}
+			case "compress":
+				// billion-context-pi 压缩完成 → 审计 + 提醒
+				auditAndRemind(ctx);
+				break;
 		}
 	});
 

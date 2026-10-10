@@ -53,7 +53,7 @@ const STATE_ENTRY_TYPE = "hard-rules-state";
 // 那种情况下 entry 写不进去。故再按 sessionId 落一份小文件，session_start 时 entry 找不到就查它。
 const STATE_FILE = path.join(LOG_DIR, "hard-rules-state.json");
 const STATE_FILE_MAX = 50;
-const VERSION = "hard-rules/1.8.6";
+const VERSION = "hard-rules/1.8.8";
 
 type Mode = "off" | "advise" | "on";
 const MODES: Mode[] = ["on", "advise", "off"];
@@ -167,8 +167,16 @@ export default function (pi: ExtensionAPI) {
   let thinkStreamChars = 0; // 当前 thinking 块已流出的字符数（thinking_delta 累加）
   let thinkGuardArmed = false; // 本次思考是否已触发过中断（防重复调 abort）
   let thinkDeltaTypes: Record<string, number> = {}; // 诊断：本轮见过的 assistantMessageEvent 类型计数
-  let thinkGuardStreak = 0; // v1.8.4：本次会话已自动续跑次数（防「中断→重想→又超长」死循环）
+  // v1.8.7：续跑计数口径必须是「同一轮问答内」，**不是**「整个会话」。
+  // 旧实现（thinkGuardStreak）只在会话内累加 → 用满 3 次后，该会话再也不发「用户消息」纠正，
+  // 永久退化为只发卡片。而实际需求是：同一次提问内最多自动续跑 3 次，下次提问重新开始。
+  let thinkGuardRoundHits = 0; // 本轮问答内已自动续跑次数（防「中断→重想→又超长」死循环）
   let pendingThinkGuardMsg: string | null = null; // v1.8.6：待发的硬闸提示（等 agent_settled 后再发）
+  // v1.8.8（pi 1.1.0）：agent_settled 新增 aborted 字段，可区分「被取消」与「正常结束」。
+  // 但 pi 的 aborted 取自 agent-session.js:689 的 `_agentRunAbortRequested`，该变量在 abort()
+  // （agent-session.js:1911）里置位、**不区分调用者** —— 我们自己也会 abort（think guard 触发时），
+  // 所以不能简单地 `if (aborted) return`，必须自己记「这次 abort 是不是我发的」。
+  let selfAbortAt = 0; // v1.8.8：最近一次「我们自己发起 abort」的时刻（0 = 本轮不是我们 abort 的）
   let lastThinkGuardNote = ""; // 最近一次硬闸留痕（面板用）
   let outErrors = 0;
   let lastOutNote = "";
@@ -468,6 +476,20 @@ export default function (pi: ExtensionAPI) {
   //   故用 delta 累加 → O(1)/次，无需遍历 content。
   // 中断：ctx.abort()（ExtensionContext，types.d.ts:242）。
   // 阈值：PI_HARD_RULES_THINK_LIMIT（字符数，默认 50000；off/0 → 关闭）。
+  // v1.8.7：续跑计数按「同一轮问答」归零 ——
+  //   真实用户输入（source 为 "interactive" 等非 extension）→ 本轮计数清零；
+  //   硬闸自己发的续跑消息走 sendUserMessage → prompt(source: "extension")
+  //   （agent-session.js:1838）与真人输入同走 input 事件，故必须靠 source 区分，
+  //   否则自动续跑会把计数清零 → 死循环防护失效。
+  pi.on("input", async (event: any) => {
+    try {
+      if (event?.source === "extension") return;
+      thinkGuardRoundHits = 0;
+    } catch {
+      /* 不阻断输入 */
+    }
+  });
+
   pi.on("message_update", async (event: any, ctx: any) => {
     try {
       if (mode === "off") return;
@@ -536,6 +558,7 @@ export default function (pi: ExtensionAPI) {
         limit,
         aborted: true,
       });
+      selfAbortAt = Date.now(); // v1.8.8：先打标，再 abort —— 供 agent_settled 区分调用者
       try {
         ctx?.abort?.();
       } catch {
@@ -556,8 +579,8 @@ export default function (pi: ExtensionAPI) {
         const msg = tpl
           .replace(/\{chars\}/g, String(thinkStreamChars))
           .replace(/\{limit\}/g, String(limit));
-        if (thinkGuardStreak < 3) {
-          thinkGuardStreak++;
+        if (thinkGuardRoundHits < 3) {
+          thinkGuardRoundHits++;
           // v1.8.6（用户 2026-10-05 实测修正）：不能在此处直接发。此刻 isStreaming 仍为 true，
           // 无论 steer 还是 followUp 都只是进队列，而 abort 之后 agent 未必还有
           // 「下一次 LLM 调用」（实测：steer 也停在「已排队」）。
@@ -583,10 +606,27 @@ export default function (pi: ExtensionAPI) {
   // 已为 false，sendUserMessage 会直接 prompt，不再排队。
   // （agent_before_settle 走不通：它的 SessionBoundaryDraft 只有 custom / custom_message /
   //  context_edit / compaction，没有 user 角色，给不了「由用户发出」的效果。）
-  pi.on("agent_settled", async () => {
+  pi.on("agent_settled", async (event: any) => {
+    const ours = selfAbortAt > 0;
+    selfAbortAt = 0;
     if (!pendingThinkGuardMsg) return;
     const m = pendingThinkGuardMsg;
     pendingThinkGuardMsg = null;
+    // v1.8.8（pi 1.1.0）：event.aborted === true 表示本轮 run 被 abort 过。
+    // 若这次 abort 不是我们发起的 → 是用户主动取消（Esc / 停止按钮），
+    // 只把提示作为普通卡片展示，**不再 sendUserMessage 启动新一轮**，尊重「停下」的意图。
+    // （我们自己 abort 的正常路径 aborted 同样为 true，靠 ours 标记放行，否则硬闸会失效。）
+    if (event?.aborted && !ours) {
+      try {
+        pi.sendMessage(
+          { customType: "hard-rules-think-guard", content: m, display: true },
+          { triggerTurn: false },
+        );
+      } catch {
+        /* 发不出不影响 */
+      }
+      return;
+    }
     try {
       pi.sendUserMessage(m);
     } catch {

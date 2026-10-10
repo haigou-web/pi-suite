@@ -1,5 +1,6 @@
-// multistep-gate.ts — pi 扩展：多步判定 + 提示词注入（另含任务面板对账）
+// multistep-gate.ts — pi 扩展：多步判定 + 提示词注入
 //
+// 2026-10-07：随 @tintinweb/pi-tasks 移除，任务面板对账（tasks-reconcile.mjs）整块删除。
 // 2026-09-23 大删减（用户决定）：只保留「判定 + 贴规则」两件事。
 //   删掉的：步号 k/n 的记账与推进、首行锚点解析与代写、steps.mjs 模块、「已完成」计数、
 //   进行中任务的过期（PI_MULTISTEP_TASK_MAX_IDLE / TASK_IDLE_MS / AUTO_ANCHOR 三个开关一并作废）。
@@ -27,10 +28,9 @@
 //   ② 日志：判定与注入结果在当轮就落 jsonl（id = judge-<序号>），字段含 cls / pMulti / source /
 //      regex / injected / th / ms / in_tok / out_tok / error。2026-09-23 起删掉 message_end 钩子，
 //      因为已经没有需要解析或改写的东西了。
-//   ③ 任务面板对账（2026-09-22 加）：不调模型、不联网，只读本地任务存储；干活多又没更新面板就提醒一次。
 //
-// 逻辑本体：./multistep-gate/judge.mjs（判定，纯函数可单测）、./multistep-gate/tasks-reconcile.mjs（对账）。
-// 判定数据依据：30 例真实样本标定。当前默认 τ=0.40（2026-09-23 晚定）：90.0% 准确 / prec 92.3% / recall 85.7%。
+// 逻辑本体：./multistep-gate/judge.mjs（判定，纯函数可单测）。
+// 判定数据依据：30 例真实样本标定（2026-09-21 ~ 09-23）。当前默认 τ=0.40（2026-09-23 晚定）：90.0% 准确 / prec 92.3% / recall 85.7%。
 //
 // ⚠️ 红线：
 //   · 模块加载期 / factory 体内只声明，不做任何可能抛错的事（pi 在加载期报错会直接 exit 1）。
@@ -48,7 +48,6 @@
 //   PI_MULTISTEP_KEY_FILE      → 覆盖 key 文件路径，默认 <PI_AGENT_DIR>/.typesafe_key.txt（仅供测试）
 //   PI_MULTISTEP_ENDPOINT      → 覆盖 Jev 端点（仅供测试：e2e 起本地假服务）
 //   PI_MULTISTEP_VIA           → 判定走哪条通道：auto（默认，先官方 registry 后 HTTP 兜底）/ http（只用老路子）
-////   任务面板对账的开关（PI_TASKSYNC / PI_TASKSYNC_*）见 tasks-reconcile.mjs。
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import fs from "node:fs";
@@ -67,9 +66,8 @@ const VERDICT_TAG = "multistep-verdict"; // 本轮判定写在用户侧的 custo
 // ⚠️ display 只影响界面渲染：发给模型的内容、落盘记录、缓存前缀都与它无关。
 const SHOW_VERDICT = process.env.PI_MULTISTEP_SHOW !== "0";
 const DEFAULT_KEY_FILE = process.env.PI_MULTISTEP_KEY_FILE || path.join(AGENT_DIR, ".typesafe_key.txt");
-const DEFAULT_THRESHOLD = 0.40; // 在两档准确率同为 90.0% 的实测中取 0.40：precision 92.3%（少把单步轮判成多步），代价是 recall 85.7%；0.30 那档 recall 100%（漏判 0）但单步轮被误判率更高。可用 PI_MULTISTEP_THRESHOLD 覆盖
+const DEFAULT_THRESHOLD = 0.40; // 2026-09-23 晚 由 0.30 回到 0.40（用户指令「将二者的阈值改为 “0.4” 而不是 “0.3”」）：两档准确率同为 90.0%，0.40 换得 precision 92.3%（少把单步轮判成多步），代价是 recall 85.7%、30 例里漏判 2 条真多步；0.30 那档 recall 100%（漏判 0）但单步轮被误判率更高。标定数据见 长期保留/Jev多步判定-实测.md；可用 PI_MULTISTEP_THRESHOLD 临时覆盖
 const DEFAULT_TIMEOUT_MS = 3000;
-const DEFAULT_TASKSYNC_LOG = process.env.PI_TASKSYNC_LOG || path.join(LOG_DIR, "task-reconcile.jsonl");
 
 type JudgeResult = {
   cls: "multi" | "single";
@@ -139,107 +137,6 @@ function ensureTypesafeEnvKey(keyFile: string): void {
   }
 }
 
-// ---- 任务面板对账模块：同样延迟加载，加载失败即整块降级禁用 ----
-// 降级不再静默：成功写一次 recon_ready，失败写一次 recon_load_failed（含错误原因），便于外部自检与排查
-let reconModPromise: Promise<any | null> | null = null;
-let reconLoadLogged = false;
-function loadRecon(): Promise<any | null> {
-  try {
-    if (!reconModPromise) {
-      reconModPromise = import("./multistep-gate/tasks-reconcile.mjs").then(
-        (m: any) => {
-          if (!reconLoadLogged) {
-            reconLoadLogged = true;
-            appendReconLog({ ts: new Date().toISOString(), event: "recon_ready", hasNoteToolResult: typeof m?.noteToolResult === "function", hasBuildReminder: typeof m?.buildReminder === "function" });
-          }
-          return m;
-        },
-        (e: any) => {
-          if (!reconLoadLogged) {
-            reconLoadLogged = true;
-            appendReconLog({ ts: new Date().toISOString(), event: "recon_load_failed", error: String(e?.message ?? e) });
-          }
-          return null;
-        },
-      );
-    }
-    return reconModPromise;
-  } catch (e: any) {
-    return Promise.resolve(null);
-  }
-}
-
-// 任务存储位置（与 @tintinweb/pi-tasks 的 task-paths.ts 同规则）：
-//   工作区：      <cwd>/.pi/tasks/tasks-<sessionId>.json
-//   session-global：<agent-dir>/tasks/sessions/<projectKey>/tasks-<sessionId>.json
-// 只为读取未完成任务，绝不写入。
-function projectKeyOf(cwd: string): string {
-  return "--" + path.resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-") + "--";
-}
-function taskFileCandidates(cwd: string, sid: string): string[] {
-  const list: string[] = [];
-  try {
-    list.push(path.join(cwd, ".pi", "tasks", "tasks-" + sid + ".json"));
-  } catch {
-    /* ignore */
-  }
-  try {
-    const home = env("USERPROFILE") || env("HOME");
-    if (home) {
-      list.push(path.join(home, ".pi", "agent", "tasks", "sessions", projectKeyOf(cwd), "tasks-" + sid + ".json"));
-    }
-  } catch {
-    /* ignore */
-  }
-  return list;
-}
-function sessionIdOf(ctx: any): string {
-  try {
-    const sm = ctx?.sessionManager;
-    if (!sm) return "";
-    if (typeof sm.getSessionFile === "function" && !sm.getSessionFile()) return "";
-    return typeof sm.getSessionId === "function" ? String(sm.getSessionId() || "") : "";
-  } catch {
-    return "";
-  }
-}
-/** 读未完成任务；读不到一律返回空数组（放行，不误报）。 */
-function readUnfinished(cwd: string, sid: string, recon: any): { tasks: any[]; file: string | null } {
-  try {
-    if (!cwd || !sid || typeof recon?.unfinishedOf !== "function") return { tasks: [], file: null };
-    for (const p of taskFileCandidates(cwd, sid)) {
-      try {
-        if (!fs.existsSync(p)) continue;
-        // 去 BOM：Windows 下别的工具/手改可能给 JSON 带上 BOM，带 BOM 会让 JSON.parse 直接抛错
-        const data = JSON.parse(fs.readFileSync(p, "utf8").replace(/^\uFEFF/, ""));
-        return { tasks: recon.unfinishedOf(data), file: p };
-      } catch {
-        /* 换下一个候选路径 */
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return { tasks: [], file: null };
-}
-function reconLogPath(): string {
-  try {
-    const p = env("PI_TASKSYNC_LOG").trim();
-    return p || DEFAULT_TASKSYNC_LOG;
-  } catch {
-    return DEFAULT_TASKSYNC_LOG;
-  }
-}
-function appendReconLog(rec: Record<string, unknown>): void {
-  try {
-    const p = reconLogPath();
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.appendFileSync(p, JSON.stringify(rec) + "\n", "utf8");
-  } catch {
-    /* 记日志失败不影响主流程 */
-  }
-}
-
 // ---- 日志（只写不改；目录不存在就建；任何失败都吞掉） ----
 function logPath(): string {
   try {
@@ -271,24 +168,6 @@ export default function (pi: ExtensionAPI) {
   let lastUserPrompt = ""; // 上一轮用户原文 → 作为 judge 的 recent_context
 
   let seq = 0;
-
-  // 任务面板对账状态
-  let reconState: any = null; // 由 tasks-reconcile.mjs 的 createReconcileState() 创建
-  let pendingRecon: { tasks: any[]; decision: any } | null = null; // 已排队、等本轮工具跑完后由 turn_end 投递的提醒
-  let reconCwd = ""; // 当前会话的 cwd（每次从 ctx 同步）
-  let reconSid = ""; // 当前会话的 sessionId（决定读哪个任务存储文件）
-  let reconProbeLogged = false; // 本会话是否已记过探针日志
-
-  function syncSession(ctx: any) {
-    if (ctx?.cwd) reconCwd = String(ctx.cwd);
-    const sid = sessionIdOf(ctx);
-    if (sid && sid !== reconSid) {
-      reconSid = sid;
-      reconState = null;
-      pendingRecon = null;
-      reconProbeLogged = false;
-    }
-  }
 
   // ---- 协议块的注入口子：before_agent_start 的返回值（2026-09-26 改）----
   // 旧写法是 pi.sendMessage(..., {deliverAs:"steer"})：消息进的是「当前这一轮的 steering 队列」，
@@ -338,16 +217,25 @@ export default function (pi: ExtensionAPI) {
     "\n" +
     "全程使用中文思维链，推理过程用中文。";
 
+  // 来源标签（2026-10-09 加）：judge.mjs 的 source 只有 "regex"（本地正则规则，不联网）与
+  // "jev"（TypeSafe 云端概率）两种。此前多步文案把来源硬编码成 "Jev p="，正则命中的结果
+  // 也被标成 Jev，误导排查（用户 2026-10-09 指出「为啥我有的会话窗口是可以用的」时暴露）。
+  function srcLabel(source: string): string {
+    if (source === "regex") return "本地正则";
+    if (source === "jev") return "Jev";
+    return source || "未知";
+  }
+
   function injectMessage(r: JudgeResult): string {
     const p = r.pMulti === null || !Number.isFinite(r.pMulti) ? "n/a" : r.pMulti.toFixed(2);
-    const head = "[多步判定] 本轮任务需要分步执行（Jev p=" + p + "，来源 " + r.source + "）。";
+    const head = "[多步判定] 本轮任务需要分步执行（" + srcLabel(r.source) + " p=" + p + "）。";
     return head + "\n\n" + MULTI_BODY;
   }
 
   function injectSingleMessage(r: JudgeResult): string {
     // 文案由用户指定（2026-09-23）：判为单步时用这段，压住「拆解 / 罗列 / 自我确认」那套中间过程。
     const p = r.pMulti === null || !Number.isFinite(r.pMulti) ? "n/a" : r.pMulti.toFixed(2);
-    const head = "[单步判定] 触发来源 " + r.source + "，置信度 " + p + "。";
+    const head = "[单步判定] 触发来源 " + srcLabel(r.source) + "，置信度 " + p + "。";
     return head + "\n\n" + SINGLE_BODY;
   }
 
@@ -355,18 +243,6 @@ export default function (pi: ExtensionAPI) {
   // 插件只决定「贴哪段规则」。多步任务的状态（第几步、总共几步、做没做完）不再由插件维护。
   pi.on("before_agent_start", async (event: any, ctx: any) => {
     try {
-      // 对账的新一轮锚点：pi 的 turn 只到「单次 LLM 步」，所以「新一轮用户请求」必须在这里判定，
-      // 不能放 turn_start（那里每步都触发，会把刚排队的提醒清掉、计数也永远攒不满）。
-      syncSession(ctx);
-      pendingRecon = null; // 丢掉上一轮残留的排队提醒
-      if (env("PI_TASKSYNC") !== "off") {
-        const mm = await loadRecon();
-        if (mm) {
-          if (!reconState) reconState = mm.createReconcileState();
-          mm.onTurnStart(reconState); // 计数归零 + 清「本轮已提醒」标记
-          appendReconLog({ ts: new Date().toISOString(), event: "reset", sid: reconSid, reason: "before_agent_start" });
-        }
-      }
       if (env("PI_MULTISTEP") === "off") {
         clearProtocolSection(event); // 停用时不留残留：section 是持续状态，不像消息那样一次性
         return undefined;
@@ -451,145 +327,10 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // ---- ③ 任务面板对账：干活多 + 没碰面板 → 注入一条临时提醒 ----
-  // 计数在 tool_result（每次工具结果都会经过这里），判定也在 tool_result 做一次，
-  // context 只负责把已排队的提醒挂到下一次 LLM 请求上（不落库、不改工具输出）。
-
-  function reconCfg(): any {
-    return {
-      minActionCalls: envNum("PI_TASKSYNC_MIN_CALLS", 10),
-      hardActionCalls: envNum("PI_TASKSYNC_HARD_CALLS", 25),
-      minSinceTouchMs: envNum("PI_TASKSYNC_MIN_SINCE_MS", 5 * 60 * 1000),
-      cooldownMs: envNum("PI_TASKSYNC_COOLDOWN_MS", 10 * 60 * 1000),
-      maxTasksInReminder: envNum("PI_TASKSYNC_MAX_TASKS", 10),
-    };
-  }
-
-  // 注意：pi 的 turn =「一次 LLM 回复 + 它的工具结果」，turn_start 每步都会触发。
-  // 所以这里只做会话同步 + 模块预热；清排队/清计数会让提醒永远来不及注入（已由真进程实验证实）。
-  pi.on("turn_start", async (_event: any, ctx: any) => {
-    try {
-      if (env("PI_TASKSYNC") === "off") return undefined;
-      syncSession(ctx);
-      await loadRecon(); // 预热：让第一次 tool_result 判定就能用上模块
-    } catch {
-      /* ignore */
-    }
-    return undefined;
-  });
-
-  pi.on("tool_result", async (event: any, ctx: any) => {
-    try {
-      if (env("PI_TASKSYNC") === "off") return undefined;
-      const m = await loadRecon();
-      if (!m || typeof m.noteToolResult !== "function") return undefined;
-      syncSession(ctx);
-      if (!reconState) reconState = m.createReconcileState();
-
-      const toolName = String(event?.toolName ?? "");
-      m.noteToolResult(reconState, toolName, Date.now());
-
-      // 碰过任务面板 → 撤销已排队的提醒（面板已经更新，不必再提醒）
-      if (typeof m.TASK_TOOL_NAMES?.has === "function" && m.TASK_TOOL_NAMES.has(toolName)) {
-        pendingRecon = null;
-        return undefined;
-      }
-
-      const { tasks, file } = readUnfinished(reconCwd, reconSid, m);
-      const d = m.evaluate(reconState, tasks.length, reconCfg(), Date.now());
-      // 探针：每个会话只记一次「为什么没提醒」，避免静默失败无从排查
-      if (!reconProbeLogged) {
-        reconProbeLogged = true;
-        appendReconLog({
-          ts: new Date().toISOString(),
-          event: "probe",
-          tool: toolName,
-          inject: d.inject,
-          reason: d.reason,
-          unfinished: tasks.length,
-          file,
-          sid: reconSid,
-          cwd: reconCwd,
-        });
-      }
-      if (d.inject) {
-        pendingRecon = { tasks, decision: d, at: Date.now() };
-        appendReconLog({
-          ts: new Date().toISOString(),
-          event: "queued",
-          reason: d.reason,
-          actionCalls: d.actionCalls,
-          sinceTouchMin: Number.isFinite(d.sinceTouchMs) ? Math.round(d.sinceTouchMs / 60000) : null,
-          unfinished: tasks.map((t: any) => t.id + ":" + t.status),
-          file,
-          sid: reconSid,
-        });
-      }
-      return undefined;
-    } catch {
-      return undefined;
-    }
-  });
-
-  // 把已排队的提醒交给 pi 官方链路投递（pi.sendMessage + deliverAs:"steer"）。
-  // 为什么落在 turn_end：官方定义 turn = 「一次 LLM 回复 + 它的工具结果」，turn_end 正好是
-  // 原 context 钩子消费提醒的同一点位（下一次 LLM 调用前），且本 turn 内后续的 tool_result
-  // （含「碰过面板 → 撤销提醒」）都发生在此之前 → 撤销窗口与 10 分钟过期判断都不变。
-  pi.on("turn_end", async () => {
-    try {
-      if (env("PI_TASKSYNC") === "off") return undefined;
-      const queued = pendingRecon;
-      if (!queued) return undefined;
-      const queuedAt = Number(queued.at ?? 0);
-      if (queuedAt && Date.now() - queuedAt > 10 * 60 * 1000) {
-        pendingRecon = null; // 排队超过 10 分钟视为过期，不再注入
-        return undefined;
-      }
-      const m = await loadRecon();
-      if (!m || typeof m.buildReminder !== "function") {
-        pendingRecon = null;
-        return undefined;
-      }
-      pendingRecon = null;
-      const nowMs = Date.now();
-      m.markInjected(reconState, nowMs);
-      const text = m.buildReminder(queued.tasks, {
-        ...queued.decision,
-        nowMs,
-        maxTasksInReminder: reconCfg().maxTasksInReminder,
-      });
-      appendReconLog({
-        ts: new Date(nowMs).toISOString(),
-        event: "injected",
-        reason: queued.decision.reason,
-        actionCalls: queued.decision.actionCalls,
-        unfinished: queued.tasks.map((t: any) => t.id + ":" + t.status),
-        chars: text.length,
-        injectedTotal: reconState?.injectedTotal ?? null,
-      });
-      // 官方链路：custom 消息落进 session（跨 resume 存活）、由 pi 自己排队；
-      // 不传 triggerTurn → 有后续 LLM 调用时搭车投递，没有也不唤醒新轮（旧实现在此处会丢）。
-      // 投影到 LLM 时仍是 role:"user" + 文本原样（pi 的 convertToLlm），buildReminder 文案一字未改。
-      void pi
-        .sendMessage({ customType: "tasks-reconcile", content: text, display: true }, { deliverAs: "steer" })
-        .catch(() => {
-          /* 投递失败不阻断主流程 */
-        });
-    } catch {
-      /* ignore */
-    }
-    return undefined;
-  });
-
-  // ---- 会话切换：清掉上一会话的残留（上一轮用户原文、排队中的对账提醒、对账计数）----
-  pi.on("session_start", async (_event: any, ctx: any) => {
+  // ---- 会话切换：清掉上一会话的残留（上一轮用户原文）----
+  pi.on("session_start", async (_event: any, _ctx: any) => {
     try {
       lastUserPrompt = "";
-      pendingRecon = null;
-      reconState = null;
-      reconSid = "";
-      reconProbeLogged = false;
-      syncSession(ctx);
     } catch {
       /* ignore */
     }

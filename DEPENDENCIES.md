@@ -47,26 +47,7 @@ top-3 + none.
 
 ---
 
-## 2. Vision model (`image-offload`)
-
-Transcribes images returned by `read` into text so image bytes never enter the main
-conversation (preserving the prompt cache).
-
-| | |
-|---|---|
-| Call mechanism | `ctx.modelRegistry.complete(ctx.model, …)` — **pi-native API, not an external service** |
-| Real dependency | **The current session model must accept image input** |
-
-| | |
-|---|---|
-| **Without it** | ✅ **fail-open**: model unavailable / throws / times out / returns empty → the image passes through unchanged; reading images never breaks |
-| **Substitutes** | Any **vision-capable model** (local Ollama llava / qwen-vl etc. work, as long as pi's provider layer can call it) |
-| **Explicit model** | `describeImages()` accepts `opts.model` / `opts.registry` for your own handle |
-| **Disable** | `PI_IMAGE_OFFLOAD=0`, or `/imgraw` to pass originals through temporarily |
-
----
-
-## 3. Sub-agents
+## 2. Sub-agents
 
 > **Status: pi-suite depends on no sub-agent at all.**
 
@@ -77,22 +58,23 @@ removed**, because they bound to an `acp_delegate` tool supplied by a private ex
 
 ### If you *want* sub-agent isolation
 
-`image-offload` currently performs **one independent model call** (`modelRegistry.complete`
-with `cacheRetention:none`) and deliberately avoids sub-agents: its only goal is keeping
-image bytes out of the main transcript, and a single call is the lightest way.
+The former `image-offload` module was the only place that considered this, and it has been
+**removed** (2026-10-17). It transcribed images into text so their bytes never entered the
+main transcript — that preserved the prompt cache, but it also replaced the model's actual
+vision with a text summary, which the user judged **seriously degraded the AI's ability to
+read images**. Reads now carry native image content parts again.
 
-For heavier isolation (e.g. a sub-agent doing multiple rounds over many images and returning
-only a conclusion), **swap in pi's native `acp_delegate`**: replace `describeImages()` with
-a dispatch to a `researcher` / `worker` sub-agent that reads the images and returns text only.
+If you want isolation for heavy material, use pi's native `acp_delegate`: dispatch to a
+`researcher` / `worker` sub-agent that reads the images and returns text only.
 
 | Approach | Cost | Fits |
 |---|---|---|
-| Current (one `complete` call) | Minimal, fixed cold start | One/few images, description only |
+| Native image content parts (current) | Prompt-prefix reuse breaks once per image message | Default; the model actually sees the image |
 | `acp_delegate` sub-agent | Extra system prompt + tool defs per call | Multi-round reasoning, batch images |
 
 ---
 
-## 4. Personal rules and config
+## 3. Personal rules and config
 
 These are not "dependencies" but **personal content extracted from someone's `AGENTS.md`**.
 The open-source copy keeps the mechanism; the content is replaceable.
@@ -105,7 +87,7 @@ The open-source copy keeps the mechanism; the content is replaceable.
 
 ---
 
-## 5. Image-generation CLI convention (`rules-hooks` H9)
+## 4. Image-generation CLI convention (`rules-hooks` H9)
 
 `rules-hooks` has a rule checking whether image-generation commands pass the model explicitly:
 
@@ -123,7 +105,7 @@ Both bind to **one specific image-generation skill (monica)** and its CLI conven
 
 ---
 
-## 6. Task-file format convention (`multistep-gate`)
+## 5. Task-file format convention (`multistep-gate`)
 
 `multistep-gate` **read-only** scans task files to inject unfinished tasks into the context
 and reconcile the task panel:
@@ -145,16 +127,16 @@ The path rules mirror **`@tintinweb/pi-tasks`**' `task-paths.ts`.
 
 ---
 
-## 7. pi-native APIs (**not** external dependencies)
+## 6. pi-native APIs (**not** external dependencies)
 
 Everything below ships with the pi extension SDK — present in any pi install, no substitute needed:
 
 | API | Purpose |
 |---|---|
 | `pi.on(event, handler)` | Event hooks (`tool_result` / `tool_call` / `context` / `session_start` / `session_before_compact` / `session_shutdown`, …) |
-| `pi.registerCommand(name, …)` | Registers `/files`, `/trash`, `/imgraw`, `/hard-rules`, … |
+| `pi.registerCommand(name, …)` | Registers `/files`, `/trash`, `/hard-rules`, … |
 | `ctx.modelRegistry.classify()` | Classifier official channel (§1) |
-| `ctx.modelRegistry.complete()` | Standalone model call (§2) |
+| `ctx.modelRegistry.complete()` | Standalone model call |
 | `ctx.ui.notify()` / `ctx.ui.setWidget()` | User notices (zero tokens, never enters context) |
 | `ctx.sessionManager.getSessionId()` | Session identity |
 
@@ -165,7 +147,6 @@ Everything below ships with the pi extension SDK — present in any pi install, 
 | Dependency | Modules | Without it | Substitute |
 |---|---|---|---|
 | Typesafe Jev classifier | `multistep-gate`, `skill-gate` | multistep **degrades to regex (usable)**; skill-gate **inert** | Regex / self-hosted compatible API / local small model / drop the module |
-| Vision-capable model | `image-offload` | fail-open, images pass through | Any vision model (local Ollama works) |
 | Sub-agent (`acp_delegate`) | **all removed** | — | Use pi-native `acp_delegate` if needed |
 | Personal hard rules | `hard-rules` | Built-in defaults | Edit `rules-config.json` |
 | File protection list | `session-file-audit` | Protection off | Edit `.pi/sfa-protect.txt` |

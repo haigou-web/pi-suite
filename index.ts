@@ -1,5 +1,5 @@
 /**
- * pi-suite/index.ts —— 7 个扩展的单一入口（2026-09-22 合并；2026-09-28 并入 image-offload）
+ * pi-suite/index.ts —— 5 个扩展的单一入口（2026-09-22 合并；2026-10-17 移除 image-offload）
  *
  * 为什么合并：这些扩展在同一个生命周期时机上互相重叠 ——
  *   session_start 5 个、tool_call 3 个、message_end 3 个、
@@ -16,7 +16,14 @@
  *   3 rules-hooks        H9 / H11 拦截 + 全量记录（H7 已于 09-23 删）
  *   4 session-file-audit 会话文件审计、/files、/trash
  *   5 skill-gate         input 技能路由改写
- *   6 image-offload      tool_result 拦截：read 的图片转写为文本、不进主会话（2026-09-28 并入）
+ *
+ * 2026-10-17 移除 image-offload（用户决定）：
+ *   · 该模块在 tool_result 阶段把 read 到的图片交给一次独立模型调用转写成文本描述，
+ *     再以文本替换原图送进主会话。省缓存有效，但**读图能力被文字描述取代** ——
+ *     用户判定「大大影响 AI 的看图能力」，要求删除。
+ *   · 源码已移入 ./长期保留/backup/image-offload.ts.<时间戳>.bak，恢复只需搬回
+ *     ./modules/ 并把下面的 import 与 MODULES 条目加回来。
+ *   · 移除后 read 到的图片按 pi 原生行为直接进入上下文（/imgraw 命令随之消失）。
  *
  * 2026-10-07 移除 @tintinweb/pi-tasks 及其三个配套模块（用户决定）：
  *   · pi-tasks-bridge    子 Agent RPC 桥 —— 只为 pi-tasks 的 TaskExecute 服务，无它则无事可做
@@ -43,6 +50,8 @@
  * 这是本文件唯一一处「非零逻辑改写」——各模块内部逻辑仍与合并前逐字一致。
  *
  * 回滚：删掉本目录、把 ./modules/ 下的条目搬回 ~/.pi/agent/extensions/ 即可。
+ *   一键脚本：ws-20260921-0943\长期保留\回滚-扩展合并.ps1
+ *   合并前快照：ws-20260921-0943\长期保留\extensions-合并前快照-20260922\
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import hardRules from "./modules/hard-rules.ts";
@@ -50,7 +59,6 @@ import multistepGate from "./modules/multistep-gate.ts";
 import rulesHooks from "./modules/rules-hooks.ts";
 import sessionFileAudit from "./modules/session-file-audit/index.ts";
 import skillGate from "./modules/skill-gate.ts";
-import imageOffload from "./modules/image-offload.ts";
 
 const MODULES: Array<[string, (pi: any) => any]> = [
   ["hard-rules", hardRules],
@@ -58,7 +66,6 @@ const MODULES: Array<[string, (pi: any) => any]> = [
   ["rules-hooks", rulesHooks],
   ["session-file-audit", sessionFileAudit],
   ["skill-gate", skillGate],
-  ["image-offload", imageOffload],
 ];
 
 /**

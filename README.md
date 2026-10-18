@@ -19,12 +19,11 @@ so you install one directory instead of eight.
 | `rules-hooks` | Mechanical guards mapped from an `AGENTS.md`: jargon-without-explanation, unrequested steps, invented numbers, missing doc-read receipts. | on |
 | `session-file-audit` | Audits file operations against the session's own history — catches destructive commands, aliased/junction paths, and protected files. | on |
 | `tool-prune` | Prunes oversized tool output before it reaches the context. | on |
-| `image-offload` | Moves image reads into a nested sub-agent so image bytes never enter the main conversation, keeping the prompt cache intact. | on |
 
 ## External dependencies and substitutes
 
 pi-suite itself has zero third-party npm dependencies, but some modules need **external
-capabilities** (an AI classifier, a vision model, an image-gen CLI convention…). Each one
+capabilities** (an AI classifier, an image-gen CLI convention…). Each one
 is documented with its local substitute and what happens when it is missing:
 
 **→ See [DEPENDENCIES.md](./DEPENDENCIES.md)**
@@ -34,7 +33,6 @@ At a glance:
 | Dependency | Modules | Without it | Substitute |
 |---|---|---|---|
 | Typesafe Jev classifier | `multistep-gate`, `skill-gate` | multistep **degrades to regex (usable)**; skill-gate **inert** | Regex / self-hosted compatible API / local model / drop module |
-| Vision-capable model | `image-offload` | fail-open, images pass through | Any vision model (local Ollama works) |
 | Sub-agent | **all removed** | — | Use pi-native `acp_delegate` if needed |
 | Personal rules / protection list / image-gen convention | `hard-rules`, `session-file-audit`, `rules-hooks` | Defaults, or rules never fire | Edit config or delete the rule |
 

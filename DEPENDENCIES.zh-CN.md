@@ -46,25 +46,7 @@ pi-suite **没有任何第三方 npm 依赖**——所有模块只 import `node:
 
 ---
 
-## 二、视觉模型（`image-offload`）
-
-把 `read` 返回的图片**转写成文本**，让图片字节永不进入主会话（保住 prompt 缓存）。
-
-| 项 | 值 |
-|---|---|
-| 调用方式 | `ctx.modelRegistry.complete(ctx.model, …)` —— **pi 原生 API，不是外部服务** |
-| 真实依赖 | **当前会话的模型必须支持视觉输入** |
-
-| | |
-|---|---|
-| **无依赖时的行为** | ✅ **fail-open**：模型不可用 / 抛错 / 超时 / 返回空 → 原样放行图片，读图功能不受影响 |
-| **本地替代** | 用任意**支持视觉的本地模型**（Ollama 的 llava / qwen-vl 等均可，只要能通过 pi 的 provider 层调用） |
-| **显式指定模型** | `describeImages()` 接受 `opts.model` / `opts.registry`，可传入你自己的模型句柄 |
-| **关掉** | `PI_IMAGE_OFFLOAD=0`，或 `/imgraw` 临时放行原图 |
-
----
-
-## 三、子 Agent
+## 二、子 Agent
 
 > **现状：pi-suite 已不依赖任何子 Agent。**
 
@@ -75,22 +57,21 @@ pi-suite **没有任何第三方 npm 依赖**——所有模块只 import `node:
 
 ### 如果你想用子 Agent 隔离上下文
 
-`image-offload` 目前的实现是「**一次独立的模型调用**」（`modelRegistry.complete`
-+ `cacheRetention:none`），刻意不走子 Agent——因为它的目标只是把图片字节挡在主
-transcript 之外，一次模型调用最轻。
+原先只有 `image-offload` 涉及这件事，**已移除**（2026-10-17）。它把图片转写成文本、让图片字节
+不进主 transcript——保住了 prompt 缓存，但也用一段文字概览**替代了模型真正的看图能力**，
+用户判定「大大影响 AI 的看图能力」。现在 `read` 到的图片恢复按 pi 原生方式带图进入上下文。
 
-但如果你希望更重的隔离（例如让子 Agent 自己多轮读图、只回结论），**可以换用 pi 原生
-的 `acp_delegate`**：把 `describeImages()` 的实现替换为派发一个 `researcher` /
+如果你需要对重素材做隔离，用 pi 原生的 `acp_delegate`：派发一个 `researcher` /
 `worker` 子 Agent，让它读图后只返回文本结论。
 
 | 方案 | 代价 | 适用 |
 |---|---|---|
-| 当前实现（一次 `complete` 调用） | 最小，固定冷启动 | 单张/少量图，只要文字描述 |
+| 原生图片 content part（当前） | 每条含图消息会打断一次 prompt 前缀复用 | 默认；模型真正看到图 |
 | 换成 `acp_delegate` 子 Agent | 每次多一份 system prompt + 工具定义 | 需要多轮推理、批处理多图 |
 
 ---
 
-## 四、私有规则与配置
+## 三、私有规则与配置
 
 这些不是「依赖」，而是**从某个人的 `AGENTS.md` 抽出来的个人化内容**。开源版本保留
 了机制、但内容可替换。
@@ -103,7 +84,7 @@ transcript 之外，一次模型调用最轻。
 
 ---
 
-## 五、生图工具约定（`rules-hooks` 的 H9）
+## 四、生图工具约定（`rules-hooks` 的 H9）
 
 `rules-hooks` 里有一条规则，检查生图命令是否显式带了模型参数：
 
@@ -121,7 +102,7 @@ transcript 之外，一次模型调用最轻。
 
 ---
 
-## 六、任务文件格式约定（`multistep-gate`）
+## 五、任务文件格式约定（`multistep-gate`）
 
 `multistep-gate` 会**只读**地扫描任务文件，用来把未完成任务注入上下文 / 做任务面板对账：
 
@@ -142,16 +123,16 @@ transcript 之外，一次模型调用最轻。
 
 ---
 
-## 七、pi 原生 API（**不是**外部依赖）
+## 六、pi 原生 API（**不是**外部依赖）
 
 以下都是 pi 扩展 SDK 提供的，任何 pi 环境都有，无需替代：
 
 | API | 用途 |
 |---|---|
 | `pi.on(event, handler)` | 事件挂钩（`tool_result` / `tool_call` / `context` / `session_start` / `session_before_compact` / `session_shutdown` 等） |
-| `pi.registerCommand(name, …)` | 注册 `/files`、`/trash`、`/imgraw`、`/hard-rules` 等命令 |
+| `pi.registerCommand(name, …)` | 注册 `/files`、`/trash`、`/hard-rules` 等命令 |
 | `ctx.modelRegistry.classify()` | 分类器官方通道（上文 §1） |
-| `ctx.modelRegistry.complete()` | 独立模型调用（上文 §2） |
+| `ctx.modelRegistry.complete()` | 独立模型调用 |
 | `ctx.ui.notify()` / `ctx.ui.setWidget()` | 用户提示（零 token，不进上下文） |
 | `ctx.sessionManager.getSessionId()` | 会话标识 |
 
@@ -162,7 +143,6 @@ transcript 之外，一次模型调用最轻。
 | 依赖 | 涉及模块 | 缺了会怎样 | 本地替代 |
 |---|---|---|---|
 | Typesafe Jev 分类器 | `multistep-gate`, `skill-gate` | multistep **降级为正则可用**；skill-gate **失效** | 正则 / 自建兼容 API / 本地小模型 / 删模块 |
-| 支持视觉的模型 | `image-offload` | fail-open，原样放行图片 | 任意视觉模型（本地 Ollama 亦可） |
 | 子 Agent（`acp_delegate`） | **已全部移除** | — | 需要时用 pi 原生 `acp_delegate` |
 | 个人化硬规则 | `hard-rules` | 用内置默认 | 改 `rules-config.json` |
 | 文件保护名单 | `session-file-audit` | 保护关闭 | 改 `.pi/sfa-protect.txt` |

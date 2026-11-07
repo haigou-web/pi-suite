@@ -182,10 +182,11 @@ export default function (pi: ExtensionAPI) {
   // 输出检查「模块不可用」每会话只记一条 error，避免刷屏
   let outLoadErrLogged = false;
 
-  // v1.8 §R7g：思维链硬闸阈值（字符数）。未设 → 默认 10000；off/0/负 → 关闭。
+  // v1.8 §R7g：思维链硬闸阈值（字符数）。未设 → 默认 20000；off/0/负 → 关闭。
   // 注：delta 是字符串，所以阈值单位是「字符」，中文粗估 1 字 ≈ 0.6~1 token。
   // 2026-10-05 用户指定 50000 → 10000。
-  const DEFAULT_THINK_LIMIT = 10000;
+  // 2026-10-15 用户指定 10000 → 20000。
+  const DEFAULT_THINK_LIMIT = 20000;
   function thinkLimit(): number {
     const raw = env("PI_HARD_RULES_THINK_LIMIT").trim().toLowerCase();
     if (raw === "off" || raw === "0" || raw === "false") return 0;
@@ -473,8 +474,9 @@ export default function (pi: ExtensionAPI) {
   // 依据：thinking 块只通过 thinking_delta 增长（pi-ai/dist/types.d.ts:586），
   //   故用 delta 累加 → O(1)/次，无需遍历 content。
   // 中断：ctx.abort()（ExtensionContext，types.d.ts:242）。
-  // 阈值：PI_HARD_RULES_THINK_LIMIT（字符数，默认 50000；off/0 → 关闭）。
-  // v1.8.7：续跑计数按「同一轮问答」归零 ——
+  // 阈值：PI_HARD_RULES_THINK_LIMIT（字符数，默认 20000；off/0 → 关闭）。
+  // v1.8.7（用户 2026-10-06 指正）：续跑计数按「同一轮问答」归零 ——
+  // v1.8.8（2026-10-09，pi 1.1.0）：agent_settled 新增 aborted 字段，可区分「被取消」与「正常结束」。
   //   真实用户输入（source 为 "interactive" 等非 extension）→ 本轮计数清零；
   //   硬闸自己发的续跑消息走 sendUserMessage → prompt(source: "extension")
   //   （agent-session.js:1838）与真人输入同走 input 事件，故必须靠 source 区分，

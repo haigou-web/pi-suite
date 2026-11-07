@@ -12,6 +12,7 @@
  *
  * 顺序（= 合并前面板里显示的顺序，逐钩子注册次序与合并前一致）：
  *   1 hard-rules         tool_call 拦截：read 直读 pdf/docx/pptx/xlsx、monica 生图缺 -Model
+ *                        （文档转换提醒：有 doc-read 用其 to-md.ps1，没有则指向 markitdown）
  *   2 multistep-gate     before_agent_start 注入步进锚点
  *   3 rules-hooks        H9 / H11 拦截 + 全量记录（H7 已于 09-23 删）
  *   4 session-file-audit 会话文件审计、/files、/trash

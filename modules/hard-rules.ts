@@ -1,7 +1,8 @@
 // hard-rules.ts — pi 扩展：硬规则守卫（fail-open，但「响亮的」fail-open）
 //
 // 作用：把 AGENTS.md 里两条「说了也常被长上下文冲掉」的硬规则，从「文本」搬成「代码」——
-//   ① §7 禁止 read 直读 .pdf/.docx/.pptx/.xlsx（必须先用 doc-read 的 to-md.ps1 转 md）
+//   ① §7 禁止 read 直读 .pdf/.docx/.pptx/.xlsx（必须先用 doc-read 的 to-md.ps1 转 md；
+//      本机没装 doc-read 技能时，提醒自动改为指向开源工具 markitdown）
 //   ② §8 monica 生图必须显式 -Model 'GPT Image 2.5 Flare'，且真跑前必须先读 monica-ai-workflow/SKILL.md
 // 违规时用 tool_call 钩子否决本次调用，并把「正确的下一步命令」原样塞进 reason。
 //

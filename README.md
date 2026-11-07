@@ -13,10 +13,10 @@ so you install one directory instead of eight.
 
 | Module | What it does | Default |
 |---|---|---|
-| `hard-rules` | Blocks two zero-ambiguity, high-cost mistakes: reading `.pdf/.docx/.pptx/.xlsx` directly instead of converting to markdown first, and running an image-generation command without an explicit model argument. Also rewrites/removes boilerplate and chain-of-thought leakage from outgoing replies (rules ④ ⑤ J1 R7 H1–H3). | on |
+| `hard-rules` | Blocks two zero-ambiguity, high-cost mistakes: reading `.pdf/.docx/.pptx/.xlsx` directly instead of converting to markdown first, and running an image-generation command without an explicit model argument. The conversion hint uses a local `doc-read` script when that skill is installed, and otherwise points at the open-source [markitdown](https://github.com/microsoft/markitdown). Also rewrites/removes boilerplate and chain-of-thought leakage from outgoing replies (rules ④ ⑤ J1 R7 H1–H3). | on |
 | `multistep-gate` | Classifies each user turn as single-step or multi-step (regex first, Jev classifier as fallback) and injects the matching instruction block. | on |
 | `skill-gate` | Routes a request to a skill before the turn is submitted: two-stage choice over the skill roster, rewrites the message to `/skill:<name>` when confident. | on |
-| `rules-hooks` | Mechanical guards mapped from an `AGENTS.md`: jargon-without-explanation, unrequested steps, invented numbers, missing doc-read receipts. | on |
+| `rules-hooks` | Mechanical guards mapped from an `AGENTS.md`: jargon-without-explanation, unrequested steps, invented numbers, missing doc-read receipts (a `to-md.ps1` or `markitdown` call both count). | on |
 | `session-file-audit` | Audits file operations against the session's own history — catches destructive commands, aliased/junction paths, and protected files. | on |
 | `tool-prune` | Prunes oversized tool output before it reaches the context. | on |
 

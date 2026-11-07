@@ -1,7 +1,9 @@
 // hard-rules/rules.mjs — 「硬规则守卫」纯判定逻辑（无 pi 依赖，可被单测直接 import）
 //
 // 只拦两类「高代价且零歧义」的违规，其余一律放行（宁可漏拦，不可误伤）：
-//   ① AGENTS.md §7：禁止用 read 直读 .pdf/.docx/.pptx/.xlsx —— 必须先跑 doc-read 的 to-md.ps1 转成 md
+//   ① AGENTS.md §7：禁止用 read 直读 .pdf/.docx/.pptx/.xlsx —— 必须先转 md。
+//      优先本机 doc-read 技能的 to-md.ps1；该技能未安装时，退回开源工具 markitdown
+//      （https://github.com/microsoft/markitdown，`pip install markitdown`）。
 //   ② AGENTS.md §8：monica 生图必须显式 -Model 'GPT Image 2.5 Flare'（省略/auto 会漂成 Recraft V3 Raw），
 //      且真跑前必须先读 monica-ai-workflow/SKILL.md
 //
@@ -68,10 +70,14 @@ export const SHELL_TOOLS = new Set(["bash", "powershell", "pwsh", "shell", "sh",
 const HOME = process.env.USERPROFILE || process.env.HOME || os.homedir();
 
 export function resolvePaths(home = HOME) {
+  const toMd = path.join(home, ".pi", "agent", "skills", "doc-read", "scripts", "to-md.ps1");
   return {
     home,
-    toMd: path.join(home, ".pi", "agent", "skills", "doc-read", "scripts", "to-md.ps1"),
+    toMd,
     toMdColumns: path.join(home, ".pi", "agent", "skills", "doc-read", "scripts", "to-md-columns.ps1"),
+    // 本机是否真装了 doc-read 技能：没装时提醒文案要退回开源工具 markitdown，
+    // 否则会把一个不存在的脚本路径丢给用户（clone 本仓库的人多数没有这个 skill）。
+    toMdAvailable: fs.existsSync(toMd),
     monicaGen: path.join(home, ".pi", "agent", "skills", "monica-ai-workflow", "scripts", "generate.ps1"),
     monicaSkill: path.join(home, ".pi", "agent", "skills", "monica-ai-workflow", "SKILL.md"),
   };
@@ -219,17 +225,34 @@ export function decideDocReminder({ prompt, seen = [], mode = "on" } = {}) {
 // 一行提醒（刻意压成一句：注入内容每轮都在上下文里，越短越好）
 export function docReminderText(fresh, p = resolvePaths()) {
   const list = (Array.isArray(fresh) ? fresh : [fresh]).join(" / ");
+  // 装了 doc-read 技能就走本地脚本（输出带 OUT/CHARS 回执，比通用工具可靠）；
+  // 没装就指向开源 markitdown，不让用户去猜一个本地不存在的路径。
+  const how = p.toMdAvailable
+    ? `pwsh -NoProfile -File "${p.toMd}" -Path "<绝对路径>"`
+    : `pip install markitdown 后用 markitdown "<绝对路径>" -o "<同名>.md"` +
+      "（开源工具 https://github.com/microsoft/markitdown）";
   return (
     "[硬规则 §7] 本请求涉及 " +
     list +
     "：读这类文件先转 md 再读，不要直接 read 正文 —— " +
-    `pwsh -NoProfile -File "${p.toMd}" -Path "<绝对路径>"` +
+    how +
     "（转完用 read 读产出的 .md；只是要生成/导出这类文件就忽略本行。）"
   );
 }
 
 function docReadReason(abs, p) {
   const md = path.join(path.dirname(abs), path.basename(abs, path.extname(abs)) + ".md");
+  if (!p.toMdAvailable) {
+    return [
+      "[硬规则 §7] 禁止用 read 直读文档二进制（.pdf/.docx/.pptx/.xlsx 等）——读出来是乱码，整轮白烧。",
+      "本机未安装 doc-read 技能，改用开源工具 markitdown（https://github.com/microsoft/markitdown）：",
+      "  pip install markitdown",
+      `  markitdown "${abs}" -o "${md}"`,
+      `预期产物：${md}`,
+      "拿到那个 .md 后再用 read 读，并按需检索。markitdown 只抽文本层：扫描件 / 图片型 PPT 会得到近乎空的 md，",
+      "遇到 CHARS 很小的情况要先做 OCR（或改用带版式信息的工具），不要拿空壳当结论。",
+    ].join("\n");
+  }
   return [
     "[硬规则 §7] 禁止用 read 直读文档二进制（.pdf/.docx/.pptx/.xlsx 等）——读出来是乱码，整轮白烧。",
     "正确路径是先转 md 再读（路径已是绝对路径，原样跑）：",

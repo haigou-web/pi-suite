@@ -47,7 +47,7 @@ export default function (pi: any) {
   let lastNote = "";
   let fsMod: any = null;
   let monicaConfigRun = false; // 本会话是否已跑过「不带 -ClickConfirm」的配置轮
-  let docReadSeen = false; // 本会话是否跑过 doc-read 的 to-md.ps1
+  let docReadSeen = false; // 本会话是否跑过文档转 md（doc-read 的 to-md.ps1 或 markitdown）
 
   function mode(): Mode {
     const v = String(process.env.PI_RULES_HOOKS ?? "").trim().toLowerCase();
@@ -159,8 +159,8 @@ export default function (pi: any) {
             if (!hasClick) monicaConfigRun = true; // 记下：本会话已跑过配置轮
           }
 
-          // 记录：本会话跑过 doc-read 的转换脚本（供 H8 用）
-          if (/to-md\.ps1/i.test(cmd)) docReadSeen = true;
+          // 记录：本会话跑过文档转 md（本地 to-md.ps1 或开源 markitdown 都算，供 H8 用）
+          if (/to-md\.ps1|markitdown/i.test(cmd)) docReadSeen = true;
         }
         return undefined;
       } catch {

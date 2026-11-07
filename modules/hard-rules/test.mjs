@@ -6,6 +6,7 @@
 
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import {
   decide,
   decideOutput,
@@ -78,11 +79,26 @@ for (const ext of [".pdf", ".PDF", ".docx", ".doc", ".dotx", ".pptx", ".potx", "
 }
 {
   const r = read("C:\\work\\a.pdf");
-  ok("reason 含 to-md 脚本路径", r.reasons[0].includes(P.toMd));
+  ok("reason 无 doc-read 时指向 markitdown", r.reasons[0].includes("https://github.com/microsoft/markitdown"), r.reasons[0]);
   ok("reason 含绝对目标路径", r.reasons[0].includes("C:\\work\\a.pdf"));
   ok("reason 含预期 md 产物", r.reasons[0].includes("C:\\work\\a.md"));
   ok("reason 提到 §7", r.reasons[0].includes("§7"));
   ok("target 为 resolve 后绝对路径", r.target === "C:\\work\\a.pdf");
+}
+{
+  // 造一个真的装了 doc-read 技能的临时 home，验证「有技能 → 优先本地脚本」分支
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-hr-"));
+  const scriptDir = path.join(tmpHome, ".pi", "agent", "skills", "doc-read", "scripts");
+  fs.mkdirSync(scriptDir, { recursive: true });
+  fs.writeFileSync(path.join(scriptDir, "to-md.ps1"), "# stub\n");
+  try {
+    const r = decide({ toolName: "read", input: { path: "C:\\work\\a.pdf" }, home: tmpHome });
+    const why = (r.reasons || []).join("\n");
+    ok("有 doc-read: reason 含 to-md.ps1 路径", why.includes(path.join(scriptDir, "to-md.ps1")), why);
+    ok("有 doc-read: reason 不出现 markitdown", !why.includes("markitdown"), why);
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
 }
 {
   const r = read("docs\\报告.pdf");
@@ -609,10 +625,24 @@ ok("§7提醒: off 档不判定", decideDocReminder({ prompt: "看 报告.pdf", 
   ok("§7提醒: advise 档只留痕", r.hit === true && r.inject === false && r.reason === "advise", JSON.stringify(r));
 }
 {
-  const t = docReminderText(["报告.pdf"], P);
-  ok("§7提醒: 文本含 to-md.ps1 绝对路径", t.includes(path.join(HOME, ".pi", "agent", "skills", "doc-read", "scripts", "to-md.ps1")), t);
-  ok("§7提醒: 文本含「生成/导出就忽略」出口", t.includes("忽略本行"), t);
-  ok("§7提醒: 压成一行", t.split("\n").length === 1, t);
+  const t = docReminderText(["报告.pdf"], { ...P, toMdAvailable: true });
+  ok("§7提醒(有 doc-read): 文本含 to-md.ps1 绝对路径", t.includes(path.join(HOME, ".pi", "agent", "skills", "doc-read", "scripts", "to-md.ps1")), t);
+  ok("§7提醒(有 doc-read): 不出现 markitdown", !t.includes("markitdown"), t);
+  ok("§7提醒(有 doc-read): 文本含「生成/导出就忽略」出口", t.includes("忽略本行"), t);
+  ok("§7提醒(有 doc-read): 压成一行", t.split("\n").length === 1, t);
+}
+{
+  const t = docReminderText(["报告.pdf"], { ...P, toMdAvailable: false });
+  ok("§7提醒(无 doc-read): 指向 microsoft/markitdown", t.includes("https://github.com/microsoft/markitdown"), t);
+  ok("§7提醒(无 doc-read): 不再把本地 to-md.ps1 路径丢给用户", !t.includes("to-md.ps1"), t);
+  ok("§7提醒(无 doc-read): 给出 pip install markitdown", t.includes("pip install markitdown"), t);
+  ok("§7提醒(无 doc-read): 仍是一行", t.split("\n").length === 1, t);
+}
+{
+  const r = decide({ toolName: "read", input: { path: "C:\\work\\报告.pdf" }, home: HOME });
+  const why = (r.reasons || []).join("\n");
+  ok("§7拦截(无 doc-read): 原因文案指向 markitdown", why.includes("https://github.com/microsoft/markitdown"), why);
+  ok("§7拦截(无 doc-read): 给出 markitdown 命令与产物路径", /markitdown ".*报告\.pdf" -o ".*报告\.md"/.test(why), why);
 }
 
 // ============ 汇总 ============

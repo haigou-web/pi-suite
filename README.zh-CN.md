@@ -10,10 +10,10 @@
 
 | 模块 | 作用 | 默认 |
 |---|---|---|
-| `hard-rules` | 只拦两类「代价高、零歧义」的错：直接 read `.pdf/.docx/.pptx/.xlsx` 而不先转 markdown；生图命令没显式指定模型。同时清理回复里的客套收尾、思维链泄漏、行话与过渡语空转（规则 ④ ⑤ J1 R7 H1–H3）。 | 开 |
+| `hard-rules` | 只拦两类「代价高、零歧义」的错：直接 read `.pdf/.docx/.pptx/.xlsx` 而不先转 markdown；生图命令没显式指定模型。转换提醒优先用本机 `doc-read` 脚本，**未安装该技能时自动改为指向开源工具 [markitdown](https://github.com/microsoft/markitdown)**。同时清理回复里的客套收尾、思维链泄漏、行话与过渡语空转（规则 ④ ⑤ J1 R7 H1–H3）。 | 开 |
 | `multistep-gate` | 把每一轮用户输入判成单步/多步（先正则，再用 Jev 分类器兜底），注入对应的指令块。 | 开 |
 | `skill-gate` | 在消息提交前做技能路由：对技能清单做两段式 choice，置信够高就把消息改写成 `/skill:<name>`。 | 开 |
-| `rules-hooks` | 把一份 `AGENTS.md` 里能机械判定的规则做成钩子：术语没解释、预演未要求的步骤、编数字、文档读取没给回执。 | 开 |
+| `rules-hooks` | 把一份 `AGENTS.md` 里能机械判定的规则做成钩子：术语没解释、预演未要求的步骤、编数字、文档读取没给回执（`to-md.ps1` 和 `markitdown` 都算回执）。 | 开 |
 | `session-file-audit` | 拿会话自己的历史核对文件操作——拦破坏性命令、别名/junction 路径、受保护文件。 | 开 |
 | `tool-prune` | 在超长工具输出进入上下文前先裁剪。 | 开 |
 

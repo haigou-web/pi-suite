@@ -137,8 +137,7 @@ export default function (pi: any) {
                 return {
                   block: true,
                   reason:
-                    "本机规则（AGENTS.md §8）：生图命令必须显式带 -Model 'GPT Image 2.5 Flare'。\n" +
-                    "硬要求全文见 monica-ai-workflow 技能的 SKILL.md §B。",
+                    "本机规则（AGENTS.md §8）：生图命令必须显式带 -Model 'GPT Image 2.5 Flare'（省略会静默漂成其它模型）。",
                 };
               }
               return undefined;

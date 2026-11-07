@@ -3,7 +3,7 @@
 // 作用：把 AGENTS.md 里两条「说了也常被长上下文冲掉」的硬规则，从「文本」搬成「代码」——
 //   ① §7 禁止 read 直读 .pdf/.docx/.pptx/.xlsx（必须先用 doc-read 的 to-md.ps1 转 md；
 //      本机没装 doc-read 技能时，提醒自动改为指向开源工具 markitdown）
-//   ② §8 monica 生图必须显式 -Model 'GPT Image 2.5 Flare'，且真跑前必须先读 monica-ai-workflow/SKILL.md
+//   ② §8 monica 生图必须显式 -Model 'GPT Image 2.5 Flare'
 // 违规时用 tool_call 钩子否决本次调用，并把「正确的下一步命令」原样塞进 reason。
 //
 // 判定逻辑只有一份，在 ./hard-rules/rules.mjs（可被单测/回放直接 import）。
@@ -155,8 +155,6 @@ export default function (pi: ExtensionAPI) {
   }
 
   // 判定状态
-  let monicaSkillRead = false;
-  let monicaSkillBlocks = 0;
   let blocks = 0;
   let advisories = 0;
 
@@ -324,7 +322,6 @@ export default function (pi: ExtensionAPI) {
           : `自检：规则模块未加载 ❌ 已降级为放行 — ${rulesErr || "原因不明"}`,
     );
     lines.push(`自本次加载起：拦截 ${blocks} 次 / 试运行告警 ${advisories} 次（reload 会清零）`);
-    lines.push(`monica：已读 SKILL.md=${monicaSkillRead ? "是" : "否"}，因未读被拦=${monicaSkillBlocks} 次`);
     {
       const outHow =
         mode !== "on"
@@ -662,15 +659,10 @@ export default function (pi: ExtensionAPI) {
         toolName: event?.toolName,
         input: event?.input,
         cwd: ctx?.cwd ?? process.cwd(),
-        state: { monicaSkillRead, monicaSkillBlocks },
+        state: {},
         mode,
       });
       if (!r) return undefined;
-
-      if (r.effects && r.effects.monicaSkillRead === true) monicaSkillRead = true;
-      if (r.effects && typeof r.effects.monicaSkillBlocks === "number") {
-        monicaSkillBlocks = r.effects.monicaSkillBlocks;
-      }
 
       const willBlock = r.block === true && mode === "on";
       if (willBlock) blocks++;

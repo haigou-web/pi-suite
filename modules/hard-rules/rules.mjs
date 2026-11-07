@@ -4,8 +4,10 @@
 //   ① AGENTS.md §7：禁止用 read 直读 .pdf/.docx/.pptx/.xlsx —— 必须先转 md。
 //      优先本机 doc-read 技能的 to-md.ps1；该技能未安装时，退回开源工具 markitdown
 //      （https://github.com/microsoft/markitdown，`pip install markitdown`）。
-//   ② AGENTS.md §8：monica 生图必须显式 -Model 'GPT Image 2.5 Flare'（省略/auto 会漂成 Recraft V3 Raw），
-//      且真跑前必须先读 monica-ai-workflow/SKILL.md
+//   ② AGENTS.md §8：monica 生图必须显式 -Model 'GPT Image 2.5 Flare'（省略/auto 会漂成 Recraft V3 Raw）
+//
+// 刻意不检查「是否先读过某个 SKILL.md」：那会把提醒硬编码到某个人的本地技能目录，
+// 而 clone 本仓库的人不一定装了这个技能。模型参数不依赖任何本地文件，所以保留。
 //
 // 依据：docs/extensions.md:778-840（tool_call 可返回 {block:true,reason} 否决本次调用；
 // event.input 可原地改）。API 能力边界见 pi 官方 docs/extensions.md。
@@ -24,7 +26,6 @@ const CONFIG_PATH = process.env.PI_HARD_RULES_CONFIG || path.join(__dirname, "ru
 
 const BUILTIN = {
   requiredModel: "your-image-model",
-  maxSkillBlocks: 2,
   tailScanLines: 3,
   g1WarnMax: 6,
   rubricTailWords: ["希望有帮助", "随时问我", "需要我"],
@@ -56,9 +57,6 @@ const CFG = loadConfig();
 
 export const REQUIRED_MODEL = CFG.requiredModel;
 
-// 同一会话最多拦 N 次「没先读 SKILL.md」，之后放行并留痕 —— 防止一个不肯读的 agent 被死锁。
-export const MAX_SKILL_BLOCKS = CFG.maxSkillBlocks;
-
 // 只覆盖真正的文档二进制。刻意不含 .png/.jpg（read 原生支持看图，误拦代价高）、
 // 也不含 .csv/.json/.html/.ipynb（纯文本，直读无害）。
 export const DOC_EXT = new Set([
@@ -78,8 +76,6 @@ export function resolvePaths(home = HOME) {
     // 本机是否真装了 doc-read 技能：没装时提醒文案要退回开源工具 markitdown，
     // 否则会把一个不存在的脚本路径丢给用户（clone 本仓库的人多数没有这个 skill）。
     toMdAvailable: fs.existsSync(toMd),
-    monicaGen: path.join(home, ".pi", "agent", "skills", "monica-ai-workflow", "scripts", "generate.ps1"),
-    monicaSkill: path.join(home, ".pi", "agent", "skills", "monica-ai-workflow", "SKILL.md"),
   };
 }
 
@@ -112,9 +108,6 @@ export function cmdOf(input) {
 // 只读类动词：这些开头的语句就算提到了脚本路径，也只是「看」不是「跑」
 const READONLY_HEADS =
   /^(?:get-item|gi|get-childitem|gci|test-path|select-object|select-string|get-content|gc|cat|type|more|less|head|tail|where|which|get-command|find|findstr|grep|ls|dir|node|python|py|echo|write-host|get-date|resolve-path|get-filehash|copy-item|move-item|remove-item|del|rm|erase|new-item|ni)\b/i;
-
-// 真正会读文件内容的动词（用于「命令自己读了 SKILL.md」的判定）
-const READ_HEADS = /^(?:get-content|gc|cat|type|more|less|head|tail|select-string|findstr|grep|bat)\b/i;
 
 // 按语句切分（; && || | 换行）：误伤的反面是「路径出现在别的语句里」
 export function splitStatements(cmd) {
@@ -156,21 +149,6 @@ export function isGeneratorCmd(cmd) {
 
 export function modelSpecified(cmd) {
   return /-Model\s+['"`]?GPT\s+Image\s+2\.5\s+Flare/i.test(String(cmd || ""));
-}
-
-// 命令里自己读了 SKILL.md（cat / Get-Content / gc）→ 视为已满足「先读」
-// 注意：必须限定在读类动词开头的语句上，否则 Get-Item 列路径也会被误认成「读过了」
-export function readsMonicaSkill(cmd) {
-  return splitStatements(cmd).some(
-    (st) => READ_HEADS.test(st) && /SKILL\.md/i.test(st) && /monica-ai-workflow/i.test(st)
-  );
-}
-
-export function isMonicaSkillPath(abs, p) {
-  const a = String(abs || "").toLowerCase();
-  if (!a) return false;
-  if (a === String(p.monicaSkill).toLowerCase()) return true;
-  return /monica-ai-workflow/.test(a) && /skill\.md$/.test(a);
 }
 
 // ── §7 前置提醒（v1.6）：用户消息里出现文档文件名 → 请求开始就注入一行 ─────
@@ -263,14 +241,6 @@ function docReadReason(abs, p) {
   ].join("\n");
 }
 
-function skillReadReason(p) {
-  return [
-    "[硬规则 §8] 真跑 monica 生图前必须先读技能文件（参数以它为准，不要凭记忆）：",
-    `  read  ${p.monicaSkill}`,
-    "读完再重跑你刚才那条命令（脚本参数见 SKILL.md §B）。",
-  ].join("\n");
-}
-
 function modelReason() {
   return [
     "[硬规则 §8] monica 生图必须显式指定模型，否则会静默漂成 Recraft V3 Raw：",
@@ -304,46 +274,21 @@ export function decide({ toolName, input, cwd, state, mode = "on", home = HOME }
         tags.push("doc-read");
         reasons.push(docReadReason(abs, p));
         target = abs;
-      } else if (isMonicaSkillPath(abs, p)) {
-        effects.monicaSkillRead = true; // 正常途径读了 SKILL.md
-        tags.push("monica-skill-read-ok");
-        target = abs;
       }
     }
   }
 
-  // ---- ② monica 生图（shell 工具） ----
+  // ---- ② monica 生图（shell 工具）----
+  // 只查模型参数：这一条是纯文本规则，不依赖任何本地技能目录或文件。
   if (isShellTool(name)) {
     const cmd = cmdOf(input);
-    if (cmd) {
-      const skillReadInCmd = readsMonicaSkill(cmd);
-      if (skillReadInCmd) effects.monicaSkillRead = true;
-
-      if (isGeneratorCmd(cmd)) {
-        target = cmd.replace(/\s+/g, " ").slice(0, 240);
-        const modelOk = modelSpecified(cmd);
-        const skillOk = st.monicaSkillRead === true || skillReadInCmd;
-        const blocks = Number(st.monicaSkillBlocks || 0);
-        const overridden = !skillOk && blocks >= MAX_SKILL_BLOCKS;
-
-        if (!skillOk && !overridden) {
-          tags.push("monica-skill-read");
-          reasons.push(skillReadReason(p));
-          effects.monicaSkillBlocks = blocks + 1;
-        } else if (overridden) {
-          // 拦到上限后放行：必须留痕，否则「守卫放弃了」这件事没人知道
-          tags.push("monica-skill-read-override");
-        }
-        if (!modelOk) {
-          tags.push("monica-model");
-          reasons.push(modelReason());
-        }
-        if (modelOk && skillOk) tags.push("monica-call-ok"); // 留痕：规则被遵守
-      } else if (skillReadInCmd) {
-        // 命令自己读了 SKILL.md（cat / Get-Content）→ 记状态。
-        // 必须有 tag，否则 decide 返回 null，包装层会提前 return、状态永不生效。
-        tags.push("monica-skill-read-ok");
-        target = cmd.replace(/\s+/g, " ").slice(0, 240);
+    if (cmd && isGeneratorCmd(cmd)) {
+      target = cmd.replace(/\s+/g, " ").slice(0, 240);
+      if (!modelSpecified(cmd)) {
+        tags.push("monica-model");
+        reasons.push(modelReason());
+      } else {
+        tags.push("monica-call-ok"); // 留痕：规则被遵守
       }
     }
   }

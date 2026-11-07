@@ -24,7 +24,6 @@ import {
   isGeneratorCmd,
   statementRunsGenerator,
   modelSpecified,
-  readsMonicaSkill,
   isDocPath,
   extOf,
   docExtsIn,
@@ -32,7 +31,6 @@ import {
   docReminderText,
   resolvePaths,
   REQUIRED_MODEL,
-  MAX_SKILL_BLOCKS,
 } from "./rules.mjs";
 
 const HOME = "C:\\Users\\tester";
@@ -66,10 +64,7 @@ function shell(cmd, extra = {}) {
   });
 }
 
-const GEN = [
-  "pwsh -NoProfile -File",
-  '"' + P.monicaGen + '"',
-].join(" ");
+const GEN = "pwsh -NoProfile -File C:\\tools\\gen\\generate.ps1";
 const OK_MODEL = "-Model 'GPT Image 2.5 Flare'";
 
 // ============ ① §7 read 直读文档 ============
@@ -127,7 +122,7 @@ ok("read 无 path → null", read("") === null && read(undefined) === null);
   ok("advise 模式不拦但标记 wouldBlock", r && r.block === false && r.wouldBlock === true && r.tags.includes("doc-read"));
 }
 {
-  const r = read("C:\\work\\a.pdf", { state: { monicaSkillRead: true, monicaSkillBlocks: 9 } });
+  const r = read("C:\\work\\a.pdf", { state: { blocks: 9 } });
   ok("文档硬拦不受 state 影响", r && r.block === true);
 }
 
@@ -147,59 +142,29 @@ ok("modelSpecified: auto 不算", modelSpecified("-Model auto") === false);
 ok("modelSpecified: Recraft 不算", modelSpecified("-Model 'Recraft V3 Raw'") === false);
 ok("modelSpecified: 缺失", modelSpecified("-File x.ps1 -Case 1") === false);
 
-ok("readsMonicaSkill: 命中", readsMonicaSkill("cat monica-ai-workflow\\SKILL.md") === true);
-ok("readsMonicaSkill: 只有 SKILL.md", readsMonicaSkill("cat other\\SKILL.md") === false);
-
-{
-  const r = shell(GEN + " " + OK_MODEL, { state: { monicaSkillRead: true } });
-  ok("已读技能+模型正确 → 放行并留痕", r && r.block === false && r.tags.includes("monica-call-ok"), r && JSON.stringify(r.tags));
-}
 {
   const r = shell(GEN + " " + OK_MODEL);
-  ok("未读技能 → 拦", r && r.block === true && r.tags.includes("monica-skill-read"));
-  ok("未读技能 reason 指向 SKILL.md", r.reasons[0].includes(P.monicaSkill));
-  ok("未读技能 reason 提到 §8", r.reasons[0].includes("§8"));
-  ok("计数 +1", r.effects.monicaSkillBlocks === 1);
+  ok("模型正确 → 放行并留痕", r && r.block === false && r.tags.includes("monica-call-ok"), r && JSON.stringify(r.tags));
 }
 {
-  const r = shell(GEN, { state: { monicaSkillRead: true } });
+  const r = shell(GEN);
   ok("模型缺失 → 拦", r && r.block === true && r.tags.includes("monica-model"));
   ok("模型缺失 reason 给出可抄的 -Model", r.reasons[0].includes(`-Model '${REQUIRED_MODEL}'`));
   ok("模型缺失 reason 提到 Recraft 漂移", r.reasons[0].includes("Recraft"));
+  ok("只有一条 reason（不再检查是否读过本地技能文件）", r.reasons.length === 1);
 }
 {
   const r = shell(GEN + " -Model auto");
   ok("模型=auto → 拦", r && r.block === true && r.tags.includes("monica-model"));
 }
 {
-  const r = shell(GEN);
-  ok("双违规 → 两条 reason 一次给全", r && r.block === true && r.reasons.length === 2 && r.tags.includes("monica-skill-read") && r.tags.includes("monica-model"));
+  // 不传任何 state 时行为完全相同：规则不再依赖会话状态
+  const a = shell(GEN + " " + OK_MODEL);
+  const b = shell(GEN + " " + OK_MODEL, { state: { anything: 1 } });
+  ok("不依赖 state", a && b && a.block === false && b.block === false);
 }
 {
-  const r = shell(GEN + " " + OK_MODEL, { state: { monicaSkillBlocks: MAX_SKILL_BLOCKS } });
-  ok("拦截达上限 + 模型正确 → 放行（防死锁）", r && r.block === false, r && JSON.stringify(r.tags));
-  ok("放行时留下 override 痕迹", r && r.tags.includes("monica-skill-read-override"), r && JSON.stringify(r.tags));
-}
-{
-  const r = shell(GEN, { state: { monicaSkillBlocks: MAX_SKILL_BLOCKS } });
-  ok("拦截达上限但模型仍缺 → 仍拦模型", r && r.block === true && r.tags.includes("monica-model") && !r.tags.includes("monica-skill-read"));
-}
-{
-  const cmd = "Get-Content '" + P.monicaSkill + "'; " + GEN + " " + OK_MODEL;
-  const r = shell(cmd);
-  ok("命令内自带读 SKILL.md → 视为已读", r && r.block === false && r.effects.monicaSkillRead === true, r && JSON.stringify(r.tags));
-}
-{
-  const r = read(P.monicaSkill);
-  ok("read 该 SKILL.md → 记状态且不拦", r && r.block === false && r.effects.monicaSkillRead === true && r.tags.includes("monica-skill-read-ok"));
-}
-{
-  const r = shell("Get-Content '" + P.monicaSkill + "'");
-  ok("cat 该 SKILL.md → 记状态", r && r.effects.monicaSkillRead === true && r.block === false);
-  ok("cat 该 SKILL.md → 有 tag（否则包装层收不到状态）", r && r.tags.includes("monica-skill-read-ok"), r && JSON.stringify(r.tags));
-}
-{
-  const r = shell(GEN + " " + OK_MODEL, { toolName: "bash", state: { monicaSkillRead: true } });
+  const r = shell(GEN + " " + OK_MODEL, { toolName: "bash" });
   ok("bash 工具同样适用", r && r.block === false && r.tags.includes("monica-call-ok"));
 }
 {
@@ -208,10 +173,10 @@ ok("readsMonicaSkill: 只有 SKILL.md", readsMonicaSkill("cat other\\SKILL.md") 
 }
 {
   const r = shell("pwsh -File monica-ai-workflow\\scripts\\generate.ps1 -Model 'GPT Image 2.5 Flare'", { mode: "advise" });
-  ok("advise 模式下未读也不拦", r && r.block === false && r.wouldBlock === true);
+  ok("advise 模式只留痕", r && r.block === false && r.wouldBlock === false);
 }
 {
-  const r = shell("pwsh -File monica-ai-workflow\\scripts\\generate.ps1 -Model 'GPT Image 2.5 Flare' -ClickConfirm", { state: { monicaSkillRead: true } });
+  const r = shell("pwsh -File monica-ai-workflow\\scripts\\generate.ps1 -Model 'GPT Image 2.5 Flare' -ClickConfirm");
   ok("真跑（带 -ClickConfirm）不额外拦", r && r.block === false);
 }
 
@@ -250,9 +215,6 @@ ok("decide 垃圾 input 不抛", (() => { try { decide({ toolName: "read", input
   ok("运行: 同一串里先看再跑也要拦", isGeneratorCmd("Test-Path 'C:\\x\\generate.ps1'; pwsh -File 'C:\\x\\generate.ps1' -Case 1") === true);
 }
 {
-  ok("读技能: Get-Item 列 SKILL.md 不算读过", readsMonicaSkill("Get-Item 'C:\\x\\monica-ai-workflow\\SKILL.md'") === false);
-  ok("读技能: Select-String 算读过", readsMonicaSkill("Select-String -Path 'C:\\x\\monica-ai-workflow\\SKILL.md' -Pattern Model") === true);
-  ok("读技能: echo 不算读过", readsMonicaSkill('echo "monica-ai-workflow/SKILL.md"') === false);
 }
 
 // ============ ⑤ 输出检查：rubric ④⑤（v1.2，只判定不改输出） ============
